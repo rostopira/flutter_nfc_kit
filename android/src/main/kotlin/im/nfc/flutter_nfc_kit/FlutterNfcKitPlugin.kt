@@ -26,22 +26,20 @@ import io.flutter.plugin.common.MethodChannel.Result
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.IOException
-import java.lang.ref.WeakReference
 import java.lang.reflect.InvocationTargetException
 import java.util.*
 import kotlin.concurrent.schedule
 import kotlin.concurrent.thread
 
-
 class FlutterNfcKitPlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
+    private var activity: Activity? = null
+    private var pollingTimeoutTask: TimerTask? = null
+    private var tagTechnology: TagTechnology? = null
+    private var ndefTechnology: Ndef? = null
+    private var mifareInfo: MifareInfo? = null
 
     companion object {
         private val TAG = FlutterNfcKitPlugin::class.java.name
-        private var activity: WeakReference<Activity> = WeakReference(null)
-        private var pollingTimeoutTask: TimerTask? = null
-        private var tagTechnology: TagTechnology? = null
-        private var ndefTechnology: Ndef? = null
-        private var mifareInfo: MifareInfo? = null
 
         private fun TagTechnology.transceive(data: ByteArray, timeout: Int?): ByteArray {
             if (timeout != null) {
@@ -65,13 +63,13 @@ class FlutterNfcKitPlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
     }
 
     private fun handleMethodCall(call: MethodCall, result: Result) {
-
-        if (activity.get() == null) {
+        val activity = this.activity
+        if (activity == null) {
             result.error("500", "Cannot call method when not attached to activity", null)
             return
         }
 
-        val nfcAdapter = getDefaultAdapter(activity.get())
+        val nfcAdapter = getDefaultAdapter(activity)
 
         if (nfcAdapter?.isEnabled != true && call.method != "getNFCAvailability") {
             result.error("404", "NFC not available", null)
@@ -135,9 +133,7 @@ class FlutterNfcKitPlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
                     } catch (ex: IOException) {
                         Log.e(TAG, "Close tag error", ex)
                     }
-                    if (activity.get() != null) {
-                        nfcAdapter.disableReaderMode(activity.get())
-                    }
+                    nfcAdapter.disableReaderMode(activity)
                     result.success("")
                 }
             }
@@ -423,7 +419,7 @@ class FlutterNfcKitPlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
     override fun onDetachedFromEngine(binding: FlutterPlugin.FlutterPluginBinding) {}
 
     override fun onAttachedToActivity(binding: ActivityPluginBinding) {
-        activity = WeakReference(binding.activity)
+        activity = binding.activity
     }
 
     override fun onDetachedFromActivity() {
@@ -431,10 +427,12 @@ class FlutterNfcKitPlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
         pollingTimeoutTask = null
         tagTechnology = null
         ndefTechnology = null
-        activity.clear()
+        activity = null
     }
 
-    override fun onReattachedToActivityForConfigChanges(binding: ActivityPluginBinding) {}
+    override fun onReattachedToActivityForConfigChanges(binding: ActivityPluginBinding) {
+        onAttachedToActivity(binding)
+    }
 
     override fun onDetachedFromActivityForConfigChanges() {}
 
@@ -442,8 +440,8 @@ class FlutterNfcKitPlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
 
         pollingTimeoutTask = Timer().schedule(timeout.toLong()) {
             try {
-                if (activity.get() != null) {
-                    nfcAdapter.disableReaderMode(activity.get())
+                if (activity != null) {
+                    nfcAdapter.disableReaderMode(activity)
                 }
             } catch (ex: Exception) {
                 Log.w(TAG, "Cannot disable reader mode", ex)
@@ -599,7 +597,7 @@ class FlutterNfcKitPlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
         }
 
         try {
-            nfcAdapter.enableReaderMode(activity.get(), pollHandler, technologies, null)
+            nfcAdapter.enableReaderMode(activity, pollHandler, technologies, null)
         } catch (ex: Exception) {
             Log.e(TAG, "Cannot enable reader mode", ex)
             result.error("500", "Cannot enable reader mode", ex.localizedMessage)
